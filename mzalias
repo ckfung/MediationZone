@@ -1,0 +1,232 @@
+#!/bin/sh
+
+echo
+echo "##############################################################"
+echo "            MZ Extended Pack v1.2.2 Included              " 
+echo 
+echo '  mzhome  - cd to $MZ_HOME'
+echo '  mzetc   - cd to $MZ_HOME/etc'
+echo '  mzlog   - cd to $MZ_HOME/log'
+echo '  mzdebug - cd to $MZ_HOME/tmp/debug'
+echo '  mzext   - cd to $MZ_HOME/config'
+echo 
+echo '  mzpico [extended-regexp]   - display all / filtered pico pid,name and start time'
+echo '  mzup [extended-regex]      - start all / filtered pico'
+echo '  mzdown [extended-regex]    - stop all / filtered pico'
+echo '  mzrestart [extended-regex] - restart all / filtered pico'
+echo 
+echo '  mzrmdir [extended-regexp]  - remove dir base on external reference'
+echo '  mzmkdir [extended-regexp]  - create dir base on external reference'
+echo '  mzexref [extended-regexp]  - display external reference'
+echo 
+echo '  mzlucky - lazy way to type mzsh username/password'
+echo '  mzoom   - grep any OOM in $MZ_LOG'
+echo '  mzbacklog [extended-regexp]   - display backlog in ExtRef Directory'
+echo '  mzjstack <count> <gap in sec> - generate jstack in $MZ_LOG/jstack'
+echo
+echo '  **** Limited support ****'
+echo '  mzallpico [pico name] - display all picos from webapi'
+echo '  mzallhost [host ip]   - display all hosts from webapi'
+echo
+echo "#############################################################"
+echo
+
+MZ_EXTREF="$MZ_HOME/config"
+MZ_ETC="$MZ_HOME/etc"
+MZ_LOG="$MZ_HOME/log"
+MZ_DEBUG="$MZ_HOME/tmp/debug"
+export MZ_EXTREF MZ_ETC MZ_LOG MZ_DEBUG
+
+# mz directory
+alias mzetc="cd $MZ_ETC"
+alias mzlog="cd $MZ_LOG"
+alias mzdebug="cd $MZ_DEBUG"
+alias mzext="cd $MZ_EXTREF"
+alias mzhome="cd $MZ_HOME"
+
+# mzsh command aliases
+alias mzpico=displayPico
+alias mzdown=stopPico
+alias mzup=startPico
+alias mzrestart=restartPico
+
+# external reference aliases
+alias mzrmdir=rmExtRefDir
+alias mzmkdir=mkExtRefDir
+alias mzexref=showConfig
+
+# lazy command
+alias mzlucky=lazyMz
+alias mzoom=checkOOM
+alias mzbacklog=checkBacklog
+
+# misc command
+alias mzjstack=collectJstack
+alias mzallpico=showAllPico
+alias mzallhost=showAllHost
+
+lazyMz() {
+    cmd=$(cat ~/.bash_history |egrep "mzsh \S+\/\S+" | awk '{print $1" "$2}' |grep '^mzsh'| head -1)
+    $cmd
+}
+
+checkOOM() {
+    grep -i OutOfMemory $MZ_LOG/*log
+}
+
+checkBacklog() {
+    param=$(readConfig $1)
+
+    for i in $(echo $param)
+    do
+      if [ -d $i ]; then
+        printf '%-8s' $(find $i -type f|wc -l); echo $i
+      fi
+    done
+}
+
+collectJstack() {
+    jstack_dir="$MZ_LOG/jstack/"
+    if [ ! -d $jstack_dir ]; then
+      mkdir -p $jstack_dir
+    fi
+
+
+    for i in $(showPico)
+    do
+      pico=$(echo $i|tr [:upper:] [:lower:])
+      if [ -e $MZ_LOG/$pico.pid ]; then
+        for j in `seq 1 $1`
+        do
+          dt=`date +%Y%m%d.%H%M%S`
+	  filename="$jstack_dir/$pico.$dt.$j"
+	  echo $filename
+          jstack `cat $MZ_LOG/$pico.pid` > $filename
+	  sleep $2
+        done
+      fi
+    done
+}
+
+restartPico() {
+  stopPico $1 
+  startPico $1
+}
+
+startPico() {
+  cmd="mzsh startup "
+  pico=$(showPico "$1" 'start')
+
+  echo $cmd$pico
+  $cmd$pico
+}
+
+stopPico() {
+  cmd="mzsh shutdown "
+  pico=$(showPico "$1")
+
+  echo $cmd$pico
+  $cmd$pico
+}
+
+displayPico() {
+    for i in $(showPico $1)
+    do
+      pico=$(echo $i|tr [:upper:] [:lower:])
+      if [ -e $MZ_LOG/$pico.pid ]; then
+        pid=$(cat $MZ_LOG/$pico.pid)
+	dt=$(ll $MZ_LOG/$pico.pid | awk '{print $6" "$7" "$8}')
+	printf "%-6s%-12s | since $dt" $pid $pico
+	echo
+      fi
+    done
+}
+
+showAllPico() {
+    if [ -z $1 ]; then
+      echo "Please retry with username/password"
+      return 1
+    fi
+
+    enter=$(echo $1 | sed -e 's/\//:/g')
+    wiport=$(grep -h wi.port $MZ_ETC/*xml | grep -oP '[0-9]{4,5}' | head -1)
+
+    url='http://localhost:'$wiport'/webapi/v1/picos'
+    if [ ! -z $2 ]; then
+      url=$url'/'$2
+    fi
+
+    detail=$(curl -s -H 'Accept:application/json' $url -u $enter)
+    echo $detail
+}
+
+showAllHost() {
+    if [ -z $1 ]; then
+      echo "Please retry with username/password"
+      return 1
+    fi
+
+    enter=$(echo $1 | sed -e 's/\//:/g')
+    wiport=$(grep -h wi.port $MZ_ETC/*xml | grep -oP '[0-9]{4,5}' | head -1)
+
+    url='http://localhost:'$wiport'/webapi/v1/hosts'
+    if [ ! -z $2 ]; then
+      url=$url'/'$2
+    fi
+
+    detail=$(curl -s -H 'Accept:application/json' $url -u $enter)
+    echo $detail
+}
+
+showPico() {
+    pico=
+    platform=
+
+    if [ -z $2 ]; then
+       cmd=$(mzsh status|cut -d" " -f1|grep -i -E "$1"|sort)
+    else
+       cmd=$(mzsh status|cut -d" " -f1|grep -i -E "$1"|sort -r -i)
+    fi
+
+    for i in $cmd
+    do
+        if [ ! -z $(echo $i | grep -i platform) ]; then
+            i=$(echo $i | sed -r 's/platform//i')
+	    platform=1
+        else 
+    	    pico="$pico $i"
+        fi
+    done
+
+    if [ ! -z $platform ]; then
+	# if this is for pico start include platform
+        if [ -z $2 ]; then
+            pico=$pico' platform'
+        else 
+            pico='platform '$pico
+        fi 
+    fi
+
+    echo $pico
+}
+
+rmExtRefDir() {
+  param=$(readConfig $1)
+  cmd="rm -Ir "
+  $cmd$param
+}
+
+mkExtRefDir() {
+  param=$(readConfig $1)
+  cmd="mkdir -p "
+  $cmd$param
+}
+
+showConfig() {
+  grep -h -iE "$1" $MZ_EXTREF/* 
+}
+
+readConfig() {
+  value=$(grep -E "$1" $MZ_EXTREF/* | cut -d'=' -f2 | cut -d'#' -f1)
+  echo $value
+}

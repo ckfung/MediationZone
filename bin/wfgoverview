@@ -1,0 +1,347 @@
+#!/usr/bin/perl
+
+use strict;
+use Data::Dumper;
+
+# argument handling
+my ($login) = grep {/\w+\/\w+/} @ARGV;
+my ($help) = grep {/help/} @ARGV;
+my ($norefer) = grep {/-norefer/} @ARGV;
+
+if ($help eq "help") {
+  my $message = "
+  This script is to generate a report for all the workflow groups.
+
+  Steps: 1. Ensure \$MZ_HOME is in ENV variable
+         2. COMMAND <username/password> [-norefer]
+
+  -norefer : Display the unused / not referenced workflows
+  \n\n";
+
+  print $message;
+  exit 0;
+}
+
+my $merge = {};
+
+# support MZ 7 onwards
+my $maindir = $ENV{'MZ_HOME'}."/data/space/active/content/config";
+
+# scan for all the directories
+opendir(my $DH, $maindir);
+#my @subdir = grep { /Default/ } readdir($DH);
+my @subdir = grep { /^[a-zA-Z0-9]/ && ! /SystemTask/ } readdir($DH);
+closedir($DH);
+
+# scan inner dir
+foreach my $subdir (@subdir) {
+  my $subdirpath = "$maindir/$subdir";
+
+  # find workflow or workflow group only
+  opendir(my $SDH, $subdirpath);
+  my @wfandwfg = grep { (/Workflow$/ or /Workflow Group$/) } readdir($SDH);
+  foreach my $file (@wfandwfg) {
+    my $curr_file = "$subdirpath/$file/data";
+    #print $curr_file."\n";
+    &readFile($curr_file);
+  }
+  closedir($SDH);
+}
+
+
+
+# flatten from workflow level
+my $wfset = {};
+foreach my $file (sort grep { /Workflow$/ } keys %{$merge}) {
+  my ($config_dir, $config_name, $config_type) = split /\./, $file;
+  $config_name = "$config_dir.$config_name";
+
+  foreach my $member (sort keys %{$merge->{$file}->{member}}) {
+    my @picolist;
+    my $picotype;
+
+    foreach my $pico (sort keys %{$merge->{$file}->{member}->{$member}}) {
+      # if no ec setting in wf instance
+      if ($pico eq "general") {
+        foreach my $pico (keys %{$merge->{$file}->{pico}}) {
+	  (my $piconame, $picotype) = split(/#/, $pico);
+	  push @picolist, $piconame;
+	}
+      # with ec settings in wf instances
+      } else {
+        (my $piconame, $picotype) = split(/#/, $pico);
+	push @picolist, $piconame;
+      }
+    }
+    $wfset->{$config_name.".".$member}->{config} = "$config_name,$member,$picotype,".join('#', @picolist);
+  }
+}
+
+#print Dumper($wfset);
+
+my $picoinfo = &readPicoList($login);
+my $wfstatinfo = &readWFInfo($login);
+my $ecgroupinfo = &readECGroup($login);
+my $wfginfo = &readWFGInfo($login);
+
+# print header
+if ($login ne "") {
+  print "Config Type,WFG Name,WF Name,WF Instance,Enable/Disabled,State,Pico Type,Pico Name,Possible Host\n";
+} else {
+  print "Config Type,WFG Name,WF Name,WF Instance,Pico Type,Pico Name\n";
+}
+
+# final printing
+foreach my $file (sort grep { /Workflow Group$/ } keys %{$merge}) {
+  my ($config_dir, $config_name, $config_type) = split /\./, $file;
+  my $wfg_name = "$config_dir.$config_name";
+  my $printwfg = "Workflow Group,$wfg_name";
+
+  # append details if login provided
+  if ($login ne "") {
+    $printwfg .= ",,,$wfginfo->{$wfg_name}->{mode},$wfginfo->{$wfg_name}->{scheduled}";
+  }
+  print $printwfg."\n";
+
+  # print wfg member details
+  foreach my $member (sort @{$merge->{$file}->{member}}) {
+    my @detail = split(",", $wfset->{$member}->{config});
+
+    my $printwf = "Workflow,$wfg_name,$detail[0],$detail[1]";
+    # append details if login provided
+    if ($login ne "") {
+      $printwf .= ",$wfstatinfo->{$member}->{mode},$wfstatinfo->{$member}->{state}";
+    }
+
+    $printwf .= ",$detail[2]";
+
+    # set host and ec group details
+    if ($login ne "") {
+      my $hosts;
+      my @picos = split /#/, $detail[3];
+      for (my $i=0; $i<scalar(@picos); $i++) {
+        if (exists $ecgroupinfo->{$picos[$i]}) {
+	  my @ecgpico = split /#/, $ecgroupinfo->{$picos[$i]};
+	  foreach (@ecgpico) {
+	    if (exists($picoinfo->{$_})) {
+	      foreach (@{$picoinfo->{$_}}) {
+	        $hosts->{$_} = 1;
+	      }
+	    }
+	  }
+          $picos[$i] = $picos[$i] ." ($ecgroupinfo->{$picos[$i]})";
+	}
+
+        if (exists $picoinfo->{$picos[$i]}) {
+	  foreach (@{$picoinfo->{$picos[$i]}}) {
+	    $hosts->{$_} = 1;
+	  }
+	}
+      }
+
+      # append host details
+      $printwf .= ",".join("#", @picos).",".join("#", sort keys %{$hosts});
+    } else {
+      $printwf .= ",".$detail[3];
+    }
+
+    print $printwf."\n";
+
+    # set the workflow in reference
+    $wfset->{$member}->{used} = 1;
+  }
+}
+
+if ($norefer ne "") {
+  print "\n\n######## NOT REFERENCED WORKFLOWS ########\n";
+  foreach my $wf (sort keys %{$wfset}) {
+    if (not exists $wfset->{$wf}->{used}) {
+      print $wf."\n";
+    }
+  }
+  print "\n";
+}
+
+sub readFile() {
+  my ($filename) = (@_);
+
+  my $start_wfinstance = 0;
+  my $curr_wfinstance = "";
+
+  my @file_split = split /\//, $filename;
+  my $config_name = $file_split[-3].".".$file_split[-2];
+
+  open FH, $filename || die "Cannot open file $filename : $!\n";
+  while (my $line = <FH>) {
+    chomp $line;
+
+    my $is_group = 0;
+
+    # determine the pico configured
+    if ($line =~ /<dr.PicoInstanceEntity/ || $line =~ /<dr.PicoGroupEntity/) {
+      my ($pico, $type);
+
+      my $nextline = <FH>;
+      if ($nextline =~ /Name value="(.+)"/) {
+        $pico = $1;
+        if ($nextline =~ /Group/) {
+	  $is_group = 1;
+	}
+      }
+
+      $nextline = <FH>;
+      if ($nextline =~ /Type value="(.+)"/) {
+        if ($1 == 2) {
+	  $type = "EC";
+	} elsif ($1 == 3) {
+	  $type = "ECSA";
+	}
+
+	if ($is_group == 1) {
+	  $type = $type . " Group";
+	}
+      }
+ 
+      if ($start_wfinstance == 0) {
+        $merge->{$config_name}->{pico}->{$pico."#".$type} = 1;
+      } elsif ($start_wfinstance == 1) {
+        delete($merge->{$config_name}->{member}->{$curr_wfinstance}->{general});
+        $merge->{$config_name}->{member}->{$curr_wfinstance}->{$pico."#".$type} = 1;
+      }
+    }
+
+    # determine any workflow member within WFG
+    if ($line =~ /Folder=\"(.+)\" Key=\".+\" Name=\"(.+)\" T/) {
+      my $template = $1.".".$2;
+      my $nextline = <FH>;
+      if ($nextline =~ /Template_name=\".+\" Version.*Workflow_name=\"(.+)\" d/) {
+        push(@{$merge->{$config_name}->{member}}, "$template.$1");
+      }
+    }
+
+    # determine any workflow instance within wf
+    if ($line =~ /wf-instance instanceId=".+" name="(.+)" stat/) {
+      $start_wfinstance = 1;
+      $curr_wfinstance = $1;
+
+      $merge->{$config_name}->{member}->{$1}->{general} = "1";
+    }
+
+  }
+  close FH;
+
+  if (! exists $merge->{$config_name}->{pico}) {
+    $merge->{$config_name}->{pico}->{"*#*"} = 1;
+  }
+}
+
+sub readPicoList() {
+  my ($login) = @_;
+
+  my $ref = {};
+
+  if ($login eq "") {
+    return $ref;
+  }
+
+  my @result = `mzsh $login pico -list`;
+  foreach (grep {/^\S+/} @result) {
+    chomp;
+    my @pico = split /\s+/, $_;
+    push @{$ref->{$pico[0]}}, $pico[2];
+  }
+
+  return $ref;
+}
+
+sub readWFInfo() {
+  my ($login) = @_;
+
+  my $ref = {};
+
+  if ($login eq "") {
+    return $ref;
+  }
+
+  my @result = `mzsh $login wflist -long -activationMode`;
+  foreach my $line (grep {/^\S+\.\S+/} @result) {
+    chomp $line;
+    $line =~ s/Not Started/Not_Started/g;
+    my @pico = split /\s+/, $line;
+
+    if ($pico[2] eq "ENABLED") {
+      $pico[2] = "Enabled";
+    } elsif ($pico[2] eq "DISABLED") {
+      $pico[2] = "Disabled";
+    }
+
+    $ref->{$pico[0]}->{mode} = $pico[2];
+    $ref->{$pico[0]}->{state} = $pico[3];
+  }
+
+  return $ref;
+}
+
+sub readECGroup() {
+  my ($login) = @_;
+
+  my $ref = {};
+
+  if ($login eq "") {
+    return $ref;
+  }
+
+  my @result = `mzsh $login ecgroup -list`;
+  shift @result;
+
+  foreach (@result) {
+    chomp;
+    my @pico = split /\s+/, $_;
+    $pico[2] =~ s/,/#/g;
+    $ref->{$pico[0]} = $pico[2];
+  }
+
+  return $ref;
+}
+
+sub readWFGInfo() {
+  my ($login) = @_;
+
+  my $ref = {};
+
+  if ($login eq "") {
+    return $ref;
+  }
+
+  my $res = `mzsh $login wfgrouplist`;
+  $res =~ s/\r//g;
+
+  my @result = split /\n/, $res;
+  foreach my $line (grep {/^\S+\.\S+.+/} @result) {
+    #chomp $line;
+
+    $line =~ s/Not Started/Not_Started/g;
+
+    my @pico = split /\s+/, $line;
+
+    if ($pico[2] eq "E") {
+      $pico[2] = "Enabled";
+    } elsif ($pico[2] eq "D") {
+      $pico[2] = "Disabled";
+    }
+
+    if ($pico[3] eq "true") {
+      $pico[3] = "Scheduled";
+    } else {
+      $pico[3] = "Unscheduled";
+    }
+
+    $ref->{$pico[0]}->{mode} = $pico[2];
+    $ref->{$pico[0]}->{scheduled} = $pico[3];
+  }
+
+  return $ref;
+}
+
+#print Dumper($wfg);
+#print Dumper($merge);
