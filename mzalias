@@ -1,36 +1,5 @@
 #!/bin/sh
 
-echo
-echo "##############################################################"
-echo "            MZ Extended Pack v1.2.2 Included              " 
-echo 
-echo '  mzhome  - cd to $MZ_HOME'
-echo '  mzetc   - cd to $MZ_HOME/etc'
-echo '  mzlog   - cd to $MZ_HOME/log'
-echo '  mzdebug - cd to $MZ_HOME/tmp/debug'
-echo '  mzext   - cd to $MZ_HOME/config'
-echo 
-echo '  mzpico [extended-regexp]   - display all / filtered pico pid,name and start time'
-echo '  mzup [extended-regex]      - start all / filtered pico'
-echo '  mzdown [extended-regex]    - stop all / filtered pico'
-echo '  mzrestart [extended-regex] - restart all / filtered pico'
-echo 
-echo '  mzrmdir [extended-regexp]  - remove dir base on external reference'
-echo '  mzmkdir [extended-regexp]  - create dir base on external reference'
-echo '  mzexref [extended-regexp]  - display external reference'
-echo 
-echo '  mzlucky - lazy way to type mzsh username/password'
-echo '  mzoom   - grep any OOM in $MZ_LOG'
-echo '  mzbacklog [extended-regexp]   - display backlog in ExtRef Directory'
-echo '  mzjstack <count> <gap in sec> - generate jstack in $MZ_LOG/jstack'
-echo
-echo '  **** Limited support ****'
-echo '  mzallpico [pico name] - display all picos from webapi'
-echo '  mzallhost [host ip]   - display all hosts from webapi'
-echo
-echo "#############################################################"
-echo
-
 MZ_EXTREF="$MZ_HOME/config"
 MZ_ETC="$MZ_HOME/etc"
 MZ_LOG="$MZ_HOME/log"
@@ -49,6 +18,7 @@ alias mzpico=displayPico
 alias mzdown=stopPico
 alias mzup=startPico
 alias mzrestart=restartPico
+alias mzhelp=help
 
 # external reference aliases
 alias mzrmdir=rmExtRefDir
@@ -64,6 +34,40 @@ alias mzbacklog=checkBacklog
 alias mzjstack=collectJstack
 alias mzallpico=showAllPico
 alias mzallhost=showAllHost
+
+help() {
+echo
+echo "##############################################################"
+echo "            MZ Extended Pack v1.2.2 Included              " 
+echo 
+echo '  mzhome  - cd to $MZ_HOME'
+echo '  mzetc   - cd to $MZ_HOME/etc'
+echo '  mzlog   - cd to $MZ_HOME/log'
+echo '  mzdebug - cd to $MZ_HOME/tmp/debug'
+echo '  mzext   - cd to $MZ_HOME/config'
+echo 
+echo '  mzpico [extended-regexp]   - display all / filtered pico pid,name and start time'
+echo '  mzup [extended-regex]      - start all / filtered pico'
+echo '  mzdown [extended-regex]    - stop all / filtered pico'
+echo '  mzrestart [extended-regex] - restart all / filtered pico'
+echo '  mzhelp                     - display this help message'
+echo 
+echo '  mzrmdir [extended-regexp]  - remove dir base on external reference'
+echo '  mzmkdir [extended-regexp]  - create dir base on external reference'
+echo '  mzexref [extended-regexp]  - display external reference'
+echo 
+echo '  mzlucky - lazy way to type mzsh username/password'
+echo '  mzoom   - grep any OOM in $MZ_LOG'
+echo '  mzbacklog [extended-regexp]   - display backlog in ExtRef Directory'
+echo '  mzjstack <count> <gap in sec> - generate jstack in $MZ_LOG/jstack'
+echo
+echo '  **** Limited support ****'
+echo '  mzallpico [pico name] - display all picos from webapi'
+echo '  mzallhost [host ip]   - display all hosts from webapi'
+echo
+echo "#############################################################"
+echo
+}
 
 lazyMz() {
     cmd=$(cat ~/.bash_history |egrep "mzsh \S+\/\S+" | awk '{print $1" "$2}' |grep '^mzsh'| head -1)
