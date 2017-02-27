@@ -30,6 +30,11 @@ alias mzlucky=lazyMz
 alias mzoom=checkOOM
 alias mzbacklog=checkBacklog
 
+alias mzwfstart=lazyWfStart
+alias mzwfstop=lazyWfStop
+alias mzwfgstart=lazyWfgStart
+alias mzwfgstop=lazyWfgStop
+
 # misc command
 alias mzjstack=collectJstack
 alias mzallpico=showAllPico
@@ -65,6 +70,12 @@ echo '  **** Limited support ****'
 echo '  mzallpico [pico name] - display all picos from webapi'
 echo '  mzallhost [host ip]   - display all hosts from webapi'
 echo
+echo '  **** LGU+ only ****'
+echo '  mzwfstart <username/password> <regexp> - Start workflows '
+echo '  mzwfstop <username/password> <regexp> - Stop workflows'
+echo '  mzwfgstart <username/password> <regexp> - Start workflow group'
+echo '  mzwfgstop <username/password> <regexp> - Stop workflow group'
+echo
 echo "#############################################################"
 echo
 }
@@ -72,6 +83,22 @@ echo
 lazyMz() {
     cmd=$(cat ~/.bash_history |egrep "mzsh \S+\/\S+" | awk '{print $1" "$2}' |grep '^mzsh'| head -1)
     $cmd
+}
+
+lazyWfStart() {
+    mzsh $1 wfstart $2
+}
+
+lazyWfStop() {
+    mzsh $1 wfstop $2
+}
+
+lazyWfgStart() {
+    mzsh $1 wfgroupstart $2
+}
+
+lazyWfgStop() {
+    mzsh $1 wfgroupstop $2
 }
 
 checkOOM() {
